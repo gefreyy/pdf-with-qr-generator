@@ -4,11 +4,10 @@ import {
   Get,
   Body,
   Param,
-  Res,
   Req,
-  HttpStatus,
-  ValidationPipe,
+  StreamableFile,
   NotFoundException,
+  InternalServerErrorException,
 } from '@nestjs/common';
 import express from 'express';
 import { DocumentsService } from './documents.service';
@@ -23,32 +22,31 @@ export class DocumentsController {
    */
   @Post('generate')
   async generateDocument(
-    @Body(ValidationPipe) dto: GenerateDocumentDto,
+    @Body() dto: GenerateDocumentDto,
     @Req() req: express.Request,
-    @Res() res: express.Response,
-  ) {
+  ): Promise<StreamableFile> {
     try {
       // Obtener la URL base del servidor
       const baseUrl = `${req.protocol}://${req.get('host')}`;
+      const accessToken = this.documentsService.saveDocument(dto);
+      const pdfBuffer = await this.documentsService.createDocument(
+        dto,
+        baseUrl,
+        accessToken,
+      );
 
-      // Primero guardar y obtener el token
-      const accessToken = await this.documentsService.saveDocument(dto);
-      
-      // Luego generar el PDF usando ESE MISMO token
-      const pdfBuffer = await this.documentsService.createDocument(dto, baseUrl, accessToken);
-
-      // Configurar headers para descarga del PDF
-      res.set({
-        'Content-Type': 'application/pdf',
-        'Content-Disposition': `attachment; filename="documento-${dto.clientId}-${Date.now()}.pdf"`,
-        'Content-Length': pdfBuffer.length,
+      // ✅ Usar StreamableFile en vez de @Res()
+      return new StreamableFile(pdfBuffer, {
+        type: 'application/pdf',
+        disposition: `attachment; filename="documento-${dto.clientId}-${Date.now()}.pdf"`,
       });
-
-      res.status(HttpStatus.OK).send(pdfBuffer);
     } catch (error) {
-      res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
+      const errorMessage =
+        error instanceof Error ? error.message : 'Error desconocido';
+
+      throw new InternalServerErrorException({
         message: 'Error al generar el documento',
-        error: error.message,
+        error: errorMessage,
       });
     }
   }
@@ -61,11 +59,10 @@ export class DocumentsController {
   async viewDocument(
     @Param('accessToken') accessToken: string,
     @Req() req: express.Request,
-    @Res() res: express.Response,
-  ) {
+  ): Promise<StreamableFile> {
     try {
-      // Buscar el documento usando el token único 
-      const clientData = await this.documentsService.getDocumentByAccessToken(accessToken);
+      const clientData =
+        this.documentsService.getDocumentByAccessToken(accessToken);
 
       if (!clientData) {
         throw new NotFoundException('Documento no encontrado');
@@ -74,7 +71,6 @@ export class DocumentsController {
       // Obtener la URL base
       const baseUrl = `${req.protocol}://${req.get('host')}`;
 
-      // Regenerar el PDF
       const pdfBuffer = await this.documentsService.createDocument(
         {
           clientName: clientData.clientName,
@@ -87,26 +83,21 @@ export class DocumentsController {
         accessToken,
       );
 
-      // Configurar headers para visualizar en el navegador
-      res.set({
-        'Content-Type': 'application/pdf',
-        'Content-Disposition': 'inline', // 'inline' para ver en navegador, 'attachment' para descargar
-        'Content-Length': pdfBuffer.length,
+      return new StreamableFile(pdfBuffer, {
+        type: 'application/pdf',
+        disposition: 'inline', // Para ver en navegador
       });
-
-      res.status(HttpStatus.OK).send(pdfBuffer);
     } catch (error) {
       if (error instanceof NotFoundException) {
-        res.status(HttpStatus.NOT_FOUND).json({
-          message: 'Documento no encontrado',
-          accessToken: accessToken,
-        });
-      } else {
-        res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
-          message: 'Error al visualizar el documento',
-          error: error.message,
-        });
+        throw error;
       }
+      const errorMessage =
+        error instanceof Error ? error.message : 'Error desconocido';
+
+      throw new InternalServerErrorException({
+        message: 'Error al visualizar el documento',
+        error: errorMessage,
+      });
     }
   }
 }

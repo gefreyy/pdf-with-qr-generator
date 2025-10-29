@@ -7,7 +7,7 @@ import { randomUUID } from 'crypto';
 
 @Injectable()
 export class DocumentsService {
-    /**
+  /**
    * Genera un código QR como buffer de imagen
    * El QR contiene la URL para ver el documento
    */
@@ -31,7 +31,10 @@ export class DocumentsService {
    * Genera el documento PDF con la información del cliente y el QR
    */
   async generatePDF(clientData: ClientData, baseUrl: string): Promise<Buffer> {
-    return new Promise(async (resolve, reject) => {
+    // Generar QR ANTES de crear la Promise
+    const qrImage = await this.generateQRCode(clientData.accessToken, baseUrl);
+
+    return new Promise<Buffer>((resolve, reject) => {
       try {
         // Crear documento PDF
         const doc = new PDFDocument({
@@ -39,15 +42,11 @@ export class DocumentsService {
           margins: { top: 50, bottom: 50, left: 50, right: 50 },
         });
 
-        // Buffer para almacenar el PDF
         const chunks: Buffer[] = [];
 
-        doc.on('data', (chunk) => chunks.push(chunk));
+        doc.on('data', (chunk: Buffer) => chunks.push(chunk));
         doc.on('end', () => resolve(Buffer.concat(chunks)));
-        doc.on('error', reject);
-
-        // Generar QR con la URL
-        const qrImage = await this.generateQRCode(clientData.accessToken, baseUrl);
+        doc.on('error', (err: Error) => reject(err));
 
         // ===== DISEÑO DEL DOCUMENTO =====
 
@@ -61,7 +60,9 @@ export class DocumentsService {
         doc
           .fontSize(12)
           .font('Helvetica')
-          .text(`Tipo: ${clientData.documentType || 'General'}`, { align: 'center' })
+          .text(`Tipo: ${clientData.documentType || 'General'}`, {
+            align: 'center',
+          })
           .moveDown(2);
 
         // Información del cliente
@@ -71,13 +72,22 @@ export class DocumentsService {
           .text('Información del Cliente')
           .moveDown(0.5);
 
-        const infoY = doc.y;
-
         doc.fontSize(11).font('Helvetica');
 
-        doc.text(`ID Cliente: `, { continued: true }).font('Helvetica-Bold').text(clientData.clientId);
-        doc.font('Helvetica').text(`Nombre: `, { continued: true }).font('Helvetica-Bold').text(clientData.clientName);
-        doc.font('Helvetica').text(`Email: `, { continued: true }).font('Helvetica-Bold').text(clientData.clientEmail);
+        doc
+          .text(`ID Cliente: `, { continued: true })
+          .font('Helvetica-Bold')
+          .text(clientData.clientId);
+        doc
+          .font('Helvetica')
+          .text(`Nombre: `, { continued: true })
+          .font('Helvetica-Bold')
+          .text(clientData.clientName);
+        doc
+          .font('Helvetica')
+          .text(`Email: `, { continued: true })
+          .font('Helvetica-Bold')
+          .text(clientData.clientEmail);
         doc
           .font('Helvetica')
           .text(`Fecha de Emisión: `, { continued: true })
@@ -106,12 +116,18 @@ export class DocumentsService {
         doc.moveDown(1);
 
         // Código QR
-        doc.fontSize(14).font('Helvetica-Bold').text('Código de Verificación').moveDown(0.5);
+        doc
+          .fontSize(14)
+          .font('Helvetica-Bold')
+          .text('Código de Verificación')
+          .moveDown(0.5);
 
         doc
           .fontSize(10)
           .font('Helvetica')
-          .text('Escanea este código QR para verificar la autenticidad del documento:')
+          .text(
+            'Escanea este código QR para verificar la autenticidad del documento:',
+          )
           .moveDown(0.5);
 
         // Insertar imagen QR
@@ -145,7 +161,8 @@ export class DocumentsService {
         // Finalizar documento
         doc.end();
       } catch (error) {
-        reject(error);
+        // Asegurar que siempre sea un Error
+        reject(error instanceof Error ? error : new Error(String(error)));
       }
     });
   }
@@ -153,11 +170,15 @@ export class DocumentsService {
   /**
    * Procesa la solicitud y genera el documento
    */
-  async createDocument(dto: GenerateDocumentDto, baseUrl: string, accessToken: string): Promise<Buffer> {
+  async createDocument(
+    dto: GenerateDocumentDto,
+    baseUrl: string,
+    accessToken: string,
+  ): Promise<Buffer> {
     const clientData: ClientData = {
       ...dto,
       generatedAt: new Date(),
-      accessToken // El token que se generó en saveDocument
+      accessToken,
     };
 
     return this.generatePDF(clientData, baseUrl);
@@ -169,7 +190,7 @@ export class DocumentsService {
    */
   private documentsCache = new Map<string, ClientData>();
 
-  async saveDocument(dto: GenerateDocumentDto): Promise<string> {
+  saveDocument(dto: GenerateDocumentDto): string {
     const accessToken = randomUUID();
     const clientData: ClientData = {
       ...dto,
@@ -181,7 +202,7 @@ export class DocumentsService {
     return accessToken;
   }
 
-  async getDocumentByAccessToken(accessToken: string): Promise<ClientData | undefined> {
+  getDocumentByAccessToken(accessToken: string): ClientData | undefined {
     return this.documentsCache.get(accessToken);
   }
 }
