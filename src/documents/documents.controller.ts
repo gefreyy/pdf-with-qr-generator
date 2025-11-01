@@ -8,10 +8,14 @@ import {
   StreamableFile,
   NotFoundException,
   InternalServerErrorException,
+  UseGuards,
 } from '@nestjs/common';
-import express from 'express';
 import { DocumentsService } from './documents.service';
 import { GenerateDocumentDto } from './dto/GenerateDocumentDTO';
+import { RolesGuard } from 'src/auth/roles.guard';
+import { Roles } from 'src/auth/roles.decorator';
+import { JwtAuthGuard } from 'src/auth/jwt.guard';
+import { RequestWithUser } from './interfaces/request-with-user.interface';
 
 @Controller('documents')
 export class DocumentsController {
@@ -20,10 +24,12 @@ export class DocumentsController {
   /**
    * Genera el documento PDF inicial y lo guarda para acceso posterior
    */
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('Inspector')
   @Post('generate')
   async generateDocument(
     @Body() dto: GenerateDocumentDto,
-    @Req() req: express.Request,
+    @Req() req: RequestWithUser,
   ): Promise<StreamableFile> {
     try {
       // Obtener la URL base del servidor
@@ -58,7 +64,7 @@ export class DocumentsController {
   @Get('view/:accessToken')
   async viewDocument(
     @Param('accessToken') accessToken: string,
-    @Req() req: express.Request,
+    @Req() req: RequestWithUser,
   ): Promise<StreamableFile> {
     try {
       const clientData =
